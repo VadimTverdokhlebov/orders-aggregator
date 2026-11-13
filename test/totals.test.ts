@@ -52,4 +52,41 @@ describe("GET /customers/:id/daily-totals", () => {
     const res = await dailyTotals(ctx.app, "nobody", "2026-02-10", "2026-02-10");
     expect(res.statusCode).toBe(404);
   });
+
+  it("считает gross / discount / net по скидкам", async () => {
+    await postWebhook(
+      ctx.app,
+      apiOrder({ amount: 1000, discountPercent: 10, amountPaid: 900 }),
+    );
+    await postWebhook(
+      ctx.app,
+      apiOrder({ amount: 500, discountPercent: 0, amountPaid: 500 }),
+    );
+
+    const res = await dailyTotals(ctx.app, "c_1", "2026-02-10", "2026-02-10");
+    expect(res.json()).toEqual([
+      { date: "2026-02-10", total: 1500, gross: 1500, discount: 100, net: 1400 },
+    ]);
+  });
+
+  it("день заказа считается по offset на дату заказа (DST)", async () => {
+    // Europe/Berlin: 29.03.2026 switch to UTC+2
+    // 30.03 22:30Z = 31.03 00:30 CEST → calendar day 31.03
+    ctx.api.customers.set("c_7", "Europe/Berlin");
+    await postWebhook(
+      ctx.app,
+      apiOrder({
+        customerId: "c_7",
+        amount: 1000,
+        createdAt: "2026-03-30T22:30:00Z",
+        updatedAt: "2026-03-30T22:30:00Z",
+      }),
+    );
+
+    const res = await dailyTotals(ctx.app, "c_7", "2026-03-30", "2026-03-31");
+    expect(res.json()).toEqual([
+      { date: "2026-03-30", total: 0, gross: 0, discount: 0, net: 0 },
+      { date: "2026-03-31", total: 1000, gross: 1000, discount: 0, net: 1000 },
+    ]);
+  });
 });
